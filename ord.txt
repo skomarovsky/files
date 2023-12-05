@@ -1,0 +1,136 @@
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class OrderViolation {
+    private String id;
+    private List<String> ruleViolations;
+
+    public OrderViolation(String id) {
+        this.id = id;
+        this.ruleViolations = new ArrayList<>();
+    }
+
+    public void addViolation(String violation) {
+        this.ruleViolations.add(violation);
+    }
+
+    // Getters and setters
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public List<String> getRuleViolations() {
+        return ruleViolations;
+    }
+
+    public void setRuleViolations(List<String> ruleViolations) {
+        this.ruleViolations = ruleViolations;
+    }
+}
+---
+import java.util.HashMap;
+import java.util.Map;
+
+public class OrderViolationService {
+    private Map<String, OrderViolation> violations = new HashMap<>();
+
+    public void addViolation(String orderId, String violation) {
+        violations.computeIfAbsent(orderId, OrderViolation::new).addViolation(violation);
+    }
+
+    public Map<String, OrderViolation> getViolations() {
+        return violations;
+    }
+}
+----
+package rules
+
+import your.package.name.model.Order;
+import your.package.name.model.Account;
+import your.package.name.model.Security;
+import your.package.name.model.Restriction;
+import your.package.name.service.OrderViolationService;
+
+global OrderViolationService violationService;
+
+// Rule 1: Check Account Status
+rule "Check Account Status"
+when
+    $order : Order(account.accountStatus != "ACTIVE")
+then
+    violationService.addViolation($order.getId(), "Account is not active.");
+end
+
+// Rule 2: Security Type Check
+rule "Security Type Check"
+when
+    $order : Order(security.type == "BOND")
+then
+    violationService.addViolation($order.getId(), "Order contains bond security.");
+end
+
+// Rule 3: Restriction on Security Category
+rule "Security Category Restriction"
+when
+    $order : Order(restriction.securityCategoryRestriction != null, restriction.securityCategoryRestriction != "")
+then
+    violationService.addViolation($order.getId(), "Order has specific security category restrictions.");
+end
+
+// Rule 4: Account Number Validation
+rule "Account Number Validation"
+when
+    $order : Order(account.accountNumber matches "[0-9]+")
+then
+    violationService.addViolation($order.getId(), "Order has a valid account number.");
+end
+-----
+import org.kie.api.runtime.KieContainer;
+import org.kie.api.runtime.KieSession;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import your.package.name.model.Order;
+import your.package.name.model.OrderViolation;
+import your.package.name.service.OrderViolationService;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+public class OrderProcessingService {
+
+    private final KieContainer kieContainer;
+
+    @Autowired
+    public OrderProcessingService(KieContainer kieContainer) {
+        this.kieContainer = kieContainer;
+    }
+
+    public List<OrderViolation> processOrders(Order[] orders) {
+        KieSession kieSession = kieContainer.newKieSession();
+        OrderViolationService violationService = new OrderViolationService();
+        kieSession.setGlobal("violationService", violationService);
+
+        try {
+            // Insert all orders into the session
+            for (Order order : orders) {
+                kieSession.insert(order);
+            }
+
+            // Fire all rules once after all orders are inserted
+            kieSession.fireAllRules();
+        } catch (Exception e) {
+            // Handle exception
+            // Log the exception or handle it as per your application's requirements
+        } finally {
+            kieSession.dispose(); // Ensure the session is always disposed of
+        }
+
+        return new ArrayList<>(violationService.getViolations().values());
+    }
+}
